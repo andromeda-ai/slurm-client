@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
@@ -20,7 +22,7 @@ type NodeInterface interface {
 	DeleteNode(ctx context.Context, nodeName string) error
 	UpdateNode(ctx context.Context, nodeName string, req any) error
 	GetNode(ctx context.Context, nodeName string) (*types.V0044Node, error)
-	ListNodes(ctx context.Context) (*types.V0044NodeList, error)
+	ListNodes(ctx context.Context, updateTime ...*int64) (*types.V0044NodeList, error)
 }
 
 var _ NodeInterface = &SlurmClient{}
@@ -120,8 +122,11 @@ func (c *SlurmClient) GetNode(ctx context.Context, nodeName string) (*types.V004
 }
 
 // ListNodes implements ClientInterface
-func (c *SlurmClient) ListNodes(ctx context.Context) (*types.V0044NodeList, error) {
+func (c *SlurmClient) ListNodes(ctx context.Context, updateTime ...*int64) (*types.V0044NodeList, error) {
 	params := &api.SlurmV0044GetNodesParams{}
+	if len(updateTime) > 0 && updateTime[0] != nil {
+		params.UpdateTime = ptr.To(strconv.FormatInt(*updateTime[0], 10))
+	}
 	res, err := c.SlurmV0044GetNodesWithResponse(ctx, params)
 	if err != nil {
 		return nil, err
@@ -136,7 +141,8 @@ func (c *SlurmClient) ListNodes(ctx context.Context) (*types.V0044NodeList, erro
 	}
 
 	list := &types.V0044NodeList{
-		Items: make([]types.V0044Node, len(res.JSON200.Nodes)),
+		Items:      make([]types.V0044Node, len(res.JSON200.Nodes)),
+		LastUpdate: ptr.Deref(res.JSON200.LastUpdate.Number, 0),
 	}
 	for i, item := range res.JSON200.Nodes {
 		utils.RemarshalOrDie(item, &list.Items[i])

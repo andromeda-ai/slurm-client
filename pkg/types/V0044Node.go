@@ -51,7 +51,8 @@ func (o *V0044Node) GetStateAsSet() set.Set[api.V0044NodeState] {
 }
 
 type V0044NodeList struct {
-	Items []V0044Node
+	Items      []V0044Node
+	LastUpdate int64
 }
 
 // GetType implements ObjectList.
@@ -81,6 +82,7 @@ func (o *V0044NodeList) AppendItem(object object.Object) {
 func (o *V0044NodeList) DeepCopyObjectList() object.ObjectList {
 	out := new(V0044NodeList)
 	out.Items = make([]V0044Node, len(o.Items))
+	out.LastUpdate = o.LastUpdate
 	for i, item := range o.Items {
 		out.Items[i] = *item.DeepCopy()
 	}

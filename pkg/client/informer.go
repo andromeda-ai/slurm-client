@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	defaultSyncPeriod = 30 * time.Second
-	batchPeriod       = 1 * time.Second
+	defaultSyncPeriod       = 30 * time.Second
+	defaultFullResyncPeriod = 5 * time.Minute
+	batchPeriod             = 1 * time.Second
 )
 
 type cacheEntry struct {
@@ -72,6 +73,14 @@ type informerCache struct {
 
 	// syncPeriod is the frequency to run the informer.
 	syncPeriod time.Duration
+
+	fullResyncPeriod time.Duration
+
+	enableDeltaList bool
+
+	lastServerUpdate int64
+
+	lastFullSync time.Time
 }
 
 // SetEventHandler implements InformerCache.
@@ -221,14 +230,42 @@ func (i *informerCache) doListInformer() {
 	}
 
 	opts := &ListOptions{SkipCache: true}
+	partial := false
+	if i.shouldDeltaList() {
+		updateTime := i.lastServerUpdate
+		opts.UpdateTime = &updateTime
+		partial = true
+	}
 	err := i.reader.List(context.TODO(), list, opts)
 	i.mu.Lock()
 	i.syncErrorList = err
 	if err == nil {
-		i.processObjects(list)
+		i.processObjects(list, partial)
+		i.updateServerSyncState(list, partial)
 		i.dirty = false
 	}
 	i.mu.Unlock()
+}
+
+func (i *informerCache) shouldDeltaList() bool {
+	if !i.enableDeltaList || i.objectType != types.ObjectTypeV0044Node || i.lastServerUpdate == 0 {
+		return false
+	}
+	if i.fullResyncPeriod <= 0 {
+		return true
+	}
+	return time.Since(i.lastFullSync) < i.fullResyncPeriod
+}
+
+func (i *informerCache) updateServerSyncState(list object.ObjectList, partial bool) {
+	nodeList, ok := list.(*types.V0044NodeList)
+	if !ok || nodeList.LastUpdate == 0 {
+		return
+	}
+	i.lastServerUpdate = nodeList.LastUpdate
+	if !partial {
+		i.lastFullSync = time.Now()
+	}
 }
 
 func (i *informerCache) runGetInformer(stopCh <-chan struct{}) {
@@ -394,10 +431,14 @@ func (i *informerCache) pushEvent(e event.Event) {
 	i.eventCh <- e
 }
 
-func (i *informerCache) processObjects(list object.ObjectList) {
+func (i *informerCache) processObjects(list object.ObjectList, partialList ...bool) {
+	partial := len(partialList) > 0 && partialList[0]
 	now := time.Now()
 	for _, item := range list.GetItems() {
 		i.processObject(item)
+	}
+	if partial {
+		return
 	}
 
 	for key, entry := range i.cache {
@@ -663,15 +704,21 @@ func (i *informerCache) List(ctx context.Context, list object.ObjectList, opts .
 }
 
 func newInformer(objectType object.ObjectType, reader Reader, syncPeriod time.Duration) InformerCache {
+	return newInformerWithOptions(objectType, reader, syncPeriod, defaultFullResyncPeriod, false)
+}
+
+func newInformerWithOptions(objectType object.ObjectType, reader Reader, syncPeriod, fullResyncPeriod time.Duration, enableDeltaList bool) InformerCache {
 	return &informerCache{
-		reader:       reader,
-		objectType:   objectType,
-		cache:        make(map[object.ObjectKey]*cacheEntry),
-		dirty:        true,
-		syncErrorGet: make(map[object.ObjectKey]error),
-		syncPeriod:   syncPeriod,
-		eventCh:      make(chan event.Event, 8),
-		syncCh:       make(chan struct{}, 8),
-		syncObjCh:    make(chan object.ObjectKey, 8),
+		reader:           reader,
+		objectType:       objectType,
+		cache:            make(map[object.ObjectKey]*cacheEntry),
+		dirty:            true,
+		syncErrorGet:     make(map[object.ObjectKey]error),
+		syncPeriod:       syncPeriod,
+		fullResyncPeriod: fullResyncPeriod,
+		enableDeltaList:  enableDeltaList,
+		eventCh:          make(chan event.Event, 8),
+		syncCh:           make(chan struct{}, 8),
+		syncObjCh:        make(chan object.ObjectKey, 8),
 	}
 }

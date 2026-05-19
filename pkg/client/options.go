@@ -66,6 +66,10 @@ type ClientOptions struct {
 
 	// CacheSyncPeriod is the time to wait before updating the cache
 	CacheSyncPeriod time.Duration
+
+	EnableDeltaList bool
+
+	CacheFullResyncPeriod time.Duration
 }
 
 // ApplyOptions applies the given create options on these options,
@@ -85,6 +89,10 @@ func (o *ClientOptions) ApplyToClient(co *ClientOptions) {
 		o.CacheSyncPeriod = defaultSyncPeriod
 	}
 	co.CacheSyncPeriod = o.CacheSyncPeriod
+	co.EnableDeltaList = o.EnableDeltaList
+	if o.CacheFullResyncPeriod > 0 {
+		co.CacheFullResyncPeriod = o.CacheFullResyncPeriod
+	}
 }
 
 var _ ClientOption = &ClientOptions{}
@@ -189,6 +197,8 @@ type ListOptions struct {
 
 	// WaitRefreshCache indicates to wait for the next cache refresh before reading from it.
 	WaitRefreshCache bool
+
+	UpdateTime *int64
 }
 
 var _ ListOption = &ListOptions{}
@@ -198,6 +208,7 @@ func (o *ListOptions) ApplyToList(lo *ListOptions) {
 	lo.SkipCache = o.SkipCache
 	lo.RefreshCache = o.RefreshCache
 	lo.WaitRefreshCache = o.WaitRefreshCache
+	lo.UpdateTime = o.UpdateTime
 }
 
 // ApplyOptions applies the given list options on these options,

@@ -66,7 +66,9 @@ type client struct {
 
 	config Config
 
-	cacheSyncPeriod time.Duration
+	cacheSyncPeriod       time.Duration
+	cacheFullResyncPeriod time.Duration
+	enableDeltaList       bool
 }
 
 // NewClient initializes a client.
@@ -77,7 +79,8 @@ func NewClient(config *Config, opts ...ClientOption) (Client, error) {
 
 	// Apply options
 	options := &ClientOptions{
-		CacheSyncPeriod: defaultSyncPeriod,
+		CacheSyncPeriod:       defaultSyncPeriod,
+		CacheFullResyncPeriod: defaultFullResyncPeriod,
 		DisableFor: []object.Object{
 			&types.V0044NodeResourceLayout{},
 			&types.V0044Reconfigure{},
@@ -90,10 +93,12 @@ func NewClient(config *Config, opts ...ClientOption) (Client, error) {
 
 	// create return client object
 	c := &client{
-		informers:       make(map[object.ObjectType]InformerCache),
-		uncached:        make(set.Set[object.ObjectType]),
-		config:          ptr.Deref(config, Config{}),
-		cacheSyncPeriod: options.CacheSyncPeriod,
+		informers:             make(map[object.ObjectType]InformerCache),
+		uncached:              make(set.Set[object.ObjectType]),
+		config:                ptr.Deref(config, Config{}),
+		cacheSyncPeriod:       options.CacheSyncPeriod,
+		cacheFullResyncPeriod: options.CacheFullResyncPeriod,
+		enableDeltaList:       options.EnableDeltaList,
 	}
 
 	c.ctx, c.cancel = context.WithCancel(context.Background())
@@ -680,7 +685,7 @@ func (c *client) List(
 		}
 		*objList = *out
 	case *types.V0044NodeList:
-		out, err := c.v0044Client.ListNodes(ctx)
+		out, err := c.v0044Client.ListNodes(ctx, options.UpdateTime)
 		if err != nil {
 			return err
 		}
@@ -763,7 +768,7 @@ func (c *client) GetInformer(objectType object.ObjectType) InformerCache {
 		return informerCache
 	}
 	// Ensure informer cache exists
-	c.informers[objectType] = newInformer(objectType, c, c.cacheSyncPeriod)
+	c.informers[objectType] = newInformerWithOptions(objectType, c, c.cacheSyncPeriod, c.cacheFullResyncPeriod, c.enableDeltaList)
 	return c.informers[objectType]
 }
 
